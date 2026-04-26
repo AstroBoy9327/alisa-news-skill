@@ -85,36 +85,45 @@ def get_zerkalo_news(limit=2):
 # ENDPOINT PRINCIPAL (ALISA LLAMA AQUÍ)
 # ------------------------------
 
-@app.route("/", methods=["POST"])
+@app.route("/", methods=["GET", "POST"])
 def alisa_skill():
-    """
-    Esta función se ejecuta cuando Alisa llama a la skill.
-    """
 
-    # Obtenemos el texto que dijo el usuario
+    # ✅ Para navegador / Render
+    if request.method == "GET":
+        return "OK"
+
+    # Obtenemos el texto del usuario
     data = request.get_json()
     user_text = data.get("request", {}).get("original_utterance", "").lower()
 
-    # Noticias principales (RSS)
-    news = get_rss_news(limit=3)
+    # ✅ SALUDO
+    if user_text == "":
+        text = "Здравствуйте. Я читаю глобальные новости из международных источников. Скажите: глобальные новости или зеркало."
 
-    # Si el usuario menciona Zerkalo, añadimos scraping
-    if "зеркало" in user_text:
-        zerkalo_news = get_zerkalo_news(limit=2)
-        news.extend(zerkalo_news)
+    # ✅ AYUDA (OBLIGATORIO para Yandex)
+    elif "помощь" in user_text or "что ты умеешь" in user_text:
+        text = "Я могу рассказать глобальные новости. Скажите: глобальные новости или зеркало."
 
-    # Si no se pudo obtener nada
-    if not news:
-        text = "Извините, не удалось получить новости."
     else:
-        text = "Вот международные новости. " + ". ".join(news)
+        # Noticias RSS
+        news = get_rss_news(limit=3)
 
-    # RESPUESTA EN FORMATO QUE ALISA ENTIENDE
+        # Si menciona Zerkalo
+        if "зеркало" in user_text:
+            zerkalo_news = get_zerkalo_news(limit=2)
+            news.extend(zerkalo_news)
+
+        if not news:
+            text = "Извините, не удалось получить новости."
+        else:
+            text = "Вот глобальные новости. " + ". ".join(news)
+
+    # Respuesta para Alisa
     response = {
         "response": {
             "text": text,
             "tts": text,
-            "end_session": True
+            "end_session": False
         },
         "version": "1.0"
     }
