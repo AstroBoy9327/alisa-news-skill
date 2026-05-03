@@ -1,5 +1,5 @@
 # ------------------------------
-# IMPORTAMOS LIBRERÍAS
+# IMPORTS
 # ------------------------------
 
 from flask import Flask, request, jsonify
@@ -8,13 +8,13 @@ import requests
 from bs4 import BeautifulSoup
 
 # ------------------------------
-# APP FLASK
+# APP
 # ------------------------------
 
 app = Flask(__name__)
 
 # ------------------------------
-# FUENTES RSS
+# RSS SOURCES
 # ------------------------------
 
 RSS_SOURCES = [
@@ -24,25 +24,30 @@ RSS_SOURCES = [
 ]
 
 # ------------------------------
-# RSS NEWS
+# GET RSS NEWS
 # ------------------------------
 
 def get_rss_news(limit=3):
     news = []
 
     for rss_url in RSS_SOURCES:
-        feed = feedparser.parse(rss_url)
+        try:
+            feed = feedparser.parse(rss_url)
 
-        for entry in feed.entries[:limit]:
-            news.append(entry.title)
+            for entry in feed.entries[:limit]:
+                if hasattr(entry, "title"):
+                    news.append(entry.title)
 
-        if len(news) >= limit:
-            break
+            if len(news) >= limit:
+                break
+
+        except Exception as e:
+            print("RSS ERROR:", e)
 
     return news[:limit]
 
 # ------------------------------
-# ZERKALO SCRAPING
+# GET ZERKALO NEWS
 # ------------------------------
 
 def get_zerkalo_news(limit=2):
@@ -63,60 +68,65 @@ def get_zerkalo_news(limit=2):
             if text:
                 news.append(text)
 
-    except Exception:
-        pass
+    except Exception as e:
+        print("ZERKALO ERROR:", e)
 
     return news
 
 # ------------------------------
-# ENDPOINT ALISA
+# MAIN ENDPOINT (ALISA)
 # ------------------------------
 
 @app.route("/", methods=["GET", "POST"])
 def alisa_skill():
 
-    # ✔️ GET para navegador / Render
+    # GET → para navegador / Render health check
     if request.method == "GET":
-        return "OK"
+        return "OK", 200
 
-    # ✔️ Manejo seguro del JSON
-    data = request.get_json(silent=True)
-
-    if not data:
-        user_text = ""
-    else:
+    try:
+        # Leer JSON seguro
+        data = request.get_json(force=True, silent=True) or {}
         user_text = data.get("request", {}).get("original_utterance", "").lower()
 
-    # ✔️ SALUDO
-    if user_text == "":
-        text = "Здравствуйте. Я читаю глобальные новости из международных источников. Скажите: глобальные новости или зеркало."
+        # SALUDO
+        if user_text == "":
+            text = "Здравствуйте. Я читаю глобальные новости из международных источников. Скажите: глобальные новости или зеркало."
 
-    # ✔️ AYUDA (REQUERIDO POR YANDEX)
-    elif "помощь" in user_text or "что ты умеешь" in user_text:
-        text = "Я могу рассказать глобальные новости. Скажите: глобальные новости или зеркало."
+        # AYUDA (OBLIGATORIO)
+        elif "помощь" in user_text or "что ты умеешь" in user_text:
+            text = "Я могу рассказать глобальные новости. Скажите: глобальные новости или зеркало."
 
-    # ✔️ LÓGICA PRINCIPAL
-    else:
-        news = get_rss_news(limit=3)
-
-        if "зеркало" in user_text:
-            zerkalo_news = get_zerkalo_news(limit=2)
-            news.extend(zerkalo_news)
-
-        if not news:
-            text = "Извините, не удалось получить новости."
+        # LÓGICA PRINCIPAL
         else:
-            text = "Вот международные новости из разных источников. " + ". ".join(news)
-    # ✔️ SEGURIDAD EXTRA (anti-crash)
-    if not text:
-        text = "Ошибка обработки запроса."
+            news = get_rss_news(limit=3)
 
-    
+            if "зеркало" in user_text:
+                news.extend(get_zerkalo_news(limit=2))
 
-    return jsonify(response)
+            if not news:
+                text = "Извините, не удалось получить новости."
+            else:
+                text = "Вот международные новости из разных источников. " + ". ".join(news)
+
+    except Exception as e:
+        print("FATAL ERROR:", e)
+        text = "Произошла ошибка при обработке запроса."
+
+    # RESPUESTA FINAL (FORMATO YANDEX)
+    response = {
+        "response": {
+            "text": text,
+            "tts": text,
+            "end_session": False
+        },
+        "version": "1.0"
+    }
+
+    return jsonify(response), 200
 
 # ------------------------------
-# LOCAL RUN
+# RUN LOCAL
 # ------------------------------
 
 if __name__ == "__main__":
