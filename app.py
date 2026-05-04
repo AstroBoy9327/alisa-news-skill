@@ -4,8 +4,6 @@
 
 from flask import Flask, request, jsonify
 import feedparser
-import requests
-from bs4 import BeautifulSoup
 import random
 
 # ------------------------------
@@ -15,16 +13,17 @@ import random
 app = Flask(__name__)
 
 # ------------------------------
-# RSS (fallback)
+# RSS SOURCES (RUSO - ESTABLE)
 # ------------------------------
 
 RSS_SOURCES = [
-    "https://feeds.bbci.co.uk/news/rss.xml",
-    "https://rss.cnn.com/rss/edition.rss"
+    "https://meduza.io/rss/all",              # Principal
+    "https://www.svoboda.org/api/z-pq_iqgy_pp",
+    "https://www.dw.com/russian/rss"
 ]
 
 # ------------------------------
-# RSS NEWS
+# OBTENER NOTICIAS DESDE RSS
 # ------------------------------
 
 def get_rss_news(limit=3):
@@ -34,11 +33,15 @@ def get_rss_news(limit=3):
         try:
             feed = feedparser.parse(rss_url)
             entries = feed.entries
+
+            # Mezclar para evitar repetir siempre lo mismo
             random.shuffle(entries)
 
             for entry in entries:
-                if hasattr(entry, "title"):
-                    news.append(entry.title)
+                title = getattr(entry, "title", "").strip()
+
+                if title and title not in news:
+                    news.append(title)
 
                 if len(news) >= limit:
                     return news
@@ -49,45 +52,13 @@ def get_rss_news(limit=3):
     return news[:limit]
 
 # ------------------------------
-# ZERKALO (PRIORIDAD)
-# ------------------------------
-
-def get_zerkalo_news(limit=3):
-    news = []
-
-    try:
-        response = requests.get(
-            "https://zerkalo.io/",
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=2.5  # 🔥 clave para no fallar en moderación
-        )
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # 🔥 selector más amplio (evita quedarte sin datos)
-        headlines = soup.find_all(["h1", "h2", "h3"])
-
-        for h in headlines:
-            text = h.get_text(strip=True)
-
-            if text and len(text) > 25:
-                news.append(text)
-
-            if len(news) >= limit:
-                break
-
-    except Exception as e:
-        print("ZERKALO ERROR:", e)
-
-    return news
-
-# ------------------------------
-# MAIN ENDPOINT
+# ENDPOINT PRINCIPAL (ALISA)
 # ------------------------------
 
 @app.route("/", methods=["GET", "POST"])
 def alisa_skill():
 
+    # Health check (Render / navegador)
     if request.method == "GET":
         return "OK", 200
 
@@ -97,29 +68,26 @@ def alisa_skill():
 
         # SALUDO
         if user_text == "":
-            text = "Здравствуйте. Я читаю новости. Скажите: новости или зеркало."
+            text = "Здравствуйте. Я озвучиваю последние международные новости на русском языке. Скажите: новости."
 
-        # AYUDA
-        elif "помощь" in user_text:
-            text = "Я могу рассказать новости. Скажите: зеркало или новости."
+        # AYUDA (IMPORTANTE PARA YANDEX)
+        elif "помощь" in user_text or "что ты умеешь" in user_text:
+            text = "Я могу рассказать последние новости. Просто скажите: новости."
 
+        # NOTICIAS
         else:
-            # 🔥 INTENTA ZERKALO PRIMERO SIEMPRE
-            news = get_zerkalo_news(limit=3)
-
-            # 🔥 FALLBACK SI FALLA
-            if not news:
-                news = get_rss_news(limit=3)
+            news = get_rss_news(limit=3)
 
             if not news:
-                text = "Не удалось получить новости."
+                text = "Не удалось получить новости. Попробуйте позже."
             else:
                 text = "Вот последние новости. " + ". ".join(news)
 
     except Exception as e:
         print("FATAL ERROR:", e)
-        text = "Произошла ошибка."
+        text = "Произошла ошибка при обработке запроса."
 
+    # RESPUESTA YANDEX
     response = {
         "response": {
             "text": text,
@@ -132,7 +100,7 @@ def alisa_skill():
     return jsonify(response), 200
 
 # ------------------------------
-# RUN
+# RUN LOCAL
 # ------------------------------
 
 if __name__ == "__main__":
