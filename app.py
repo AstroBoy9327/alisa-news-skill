@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 import feedparser
 import requests
 from bs4 import BeautifulSoup
+import random
 
 # ------------------------------
 # APP
@@ -14,13 +15,13 @@ from bs4 import BeautifulSoup
 app = Flask(__name__)
 
 # ------------------------------
-# RSS SOURCES
+# RSS SOURCES (más activos)
 # ------------------------------
 
 RSS_SOURCES = [
-    "https://feeds.bbci.co.uk/mundo/rss.xml",
-    "https://www.dw.com/es/rss",
-    "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada"
+    "https://feeds.bbci.co.uk/news/rss.xml",
+    "https://rss.cnn.com/rss/edition.rss",
+    "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best"
 ]
 
 # ------------------------------
@@ -34,12 +35,15 @@ def get_rss_news(limit=3):
         try:
             feed = feedparser.parse(rss_url)
 
-            for entry in feed.entries[:limit]:
+            entries = feed.entries
+            random.shuffle(entries)  # evitar repetir siempre lo mismo
+
+            for entry in entries:
                 if hasattr(entry, "title"):
                     news.append(entry.title)
 
-            if len(news) >= limit:
-                break
+                if len(news) >= limit:
+                    return news
 
         except Exception as e:
             print("RSS ERROR:", e)
@@ -50,23 +54,29 @@ def get_rss_news(limit=3):
 # GET ZERKALO NEWS
 # ------------------------------
 
-def get_zerkalo_news(limit=2):
+def get_zerkalo_news(limit=3):
     news = []
 
     try:
         response = requests.get(
-            "https://smart.zerkalo.io/",
+            "https://zerkalo.io/",
             headers={"User-Agent": "Mozilla/5.0"},
-            timeout=5
+            timeout=3
         )
 
         soup = BeautifulSoup(response.text, "html.parser")
-        headlines = soup.find_all("h2")
 
-        for h in headlines[:limit]:
+        # Selector más controlado (puede ajustarse si cambia la web)
+        headlines = soup.select("a span")
+
+        for h in headlines:
             text = h.get_text(strip=True)
-            if text:
+
+            if text and len(text) > 30:
                 news.append(text)
+
+            if len(news) >= limit:
+                break
 
     except Exception as e:
         print("ZERKALO ERROR:", e)
@@ -80,40 +90,48 @@ def get_zerkalo_news(limit=2):
 @app.route("/", methods=["GET", "POST"])
 def alisa_skill():
 
-    # GET → para navegador / Render health check
+    # GET → health check
     if request.method == "GET":
         return "OK", 200
 
     try:
-        # Leer JSON seguro
         data = request.get_json(force=True, silent=True) or {}
         user_text = data.get("request", {}).get("original_utterance", "").lower()
 
         # SALUDO
         if user_text == "":
-            text = "Здравствуйте. Я читаю глобальные новости из международных источников. Скажите: глобальные новости или зеркало."
+            text = "Здравствуйте. Я читаю глобальные новости. Скажите: глобальные новости или зеркало."
 
-        # AYUDA (OBLIGATORIO)
+        # AYUDA
         elif "помощь" in user_text or "что ты умеешь" in user_text:
             text = "Я могу рассказать глобальные новости. Скажите: глобальные новости или зеркало."
 
-        # LÓGICA PRINCIPAL
+        # ZERKALO PRIORIDAD SOLO SI LO PIDEN
+        elif "зеркало" in user_text:
+            news = get_zerkalo_news(limit=3)
+
+            if not news:
+                news = get_rss_news(limit=3)
+
+            if not news:
+                text = "Не удалось получить новости."
+            else:
+                text = "Новости с сайта Зеркало. " + ". ".join(news)
+
+        # DEFAULT → RSS
         else:
             news = get_rss_news(limit=3)
 
-            if "зеркало" in user_text:
-                news.extend(get_zerkalo_news(limit=2))
-
             if not news:
-                text = "Извините, не удалось получить новости."
+                text = "Не удалось получить новости."
             else:
-                text = "Вот международные новости из разных источников. " + ". ".join(news)
+                text = "Вот международные новости. " + ". ".join(news)
 
     except Exception as e:
         print("FATAL ERROR:", e)
         text = "Произошла ошибка при обработке запроса."
 
-    # RESPUESTA FINAL (FORMATO YANDEX)
+    # RESPUESTA YANDEX
     response = {
         "response": {
             "text": text,
